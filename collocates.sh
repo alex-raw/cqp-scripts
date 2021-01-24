@@ -1,28 +1,50 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
 usage() {
     echo "
-    Tool to create count-annotated collocation lists based on square, space-delimited input.
+    Tool to create count-annotated collocation tables based on square, space-delimited input, typically a concordance.
     (e.g. from output of CQP tabulate)
     Author: Alexander Rauhut
 
     Usage: $0 [options] infile
+
+	-h|--header)		print header
+	-o|--omit-match)	omit original query match;
+       				use with -m if match is not in the center;
+	-m|--match-position)	provide match position for asymmetrical inputs
+	-d|--delim)		a custom field separator for output;
+				respective string is automatically quoted if it exists in data;
+				strings containing spaces need to be quoted;
+				symbols with special meaning in shell need to be escaped and quoted
+	-l|--list)		out format with collocates ordered alphabetically
+				in first column
+	--help)			view this help file
     "
 }
 
 # ---------------------- Defaults and Options---------------------------
-delim="	"
-keep=false
-list=false
+
+# no dash in argument = no options
+[ $(echo $@ | grep -o - | wc -l) = 0 ] && default=true
+
+tab=$(printf '\t')
+delim=$tab
 
 while test $# -gt 0; do
     case "$1" in
-	-h|--help)
+	--help)
 	    usage
 	    exit 0 ;;
-	-m|--keep-match)
+	-h|--header)
 	    shift
-	    keep=true ;;
+	    header=true ;;
+	-o|--omit-match)
+	    shift
+	    omit=true ;;
+	-m|--match-position)
+	    shift
+	    n_match=$1
+	    shift ;;
 	-d|--delim)
 	    shift
 	    delim="$1"
@@ -35,52 +57,80 @@ while test $# -gt 0; do
     esac
 done
 
+# set up temp directory and make sure it's deleted on any exit
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
+prefix="col_"
 
-# see below
+# take stdin or file
 data="${1:-/dev/stdin}"
+
+# hack to handle stdin; see below
 [ "$data" != "$1" ] && cat $data > $TMP/table && data="$TMP/table"
 
 # ---------------------- Loop count over columns------------------------
-ncol=$(head -1 $data | wc -w | xargs seq)
-for i in $ncol
+# infer column number from first line and loop
+ncol=$(head -1 $data | wc -w)
+for i in $(seq $ncol)
 do
     cut -f $i -d " " $data |
-    sort | uniq -c | sort -rn | \
-    sed -e "s/^[ ]*//g" \
-       	-e "s/[ ]/$delim/g" > $TMP/col$i &
+    sort | uniq -c | sort -rn |
+    awk '{ print $2 "\t" $1 }' > $TMP/$prefix$i &
 done
 wait
 
+# paste inserts 1 separator too few if
+bind_cols() {
+    paste $TMP/$prefix[0-9]* | sed -e 's/\t\t/\t\t\t/g' -e 's/^\t/\t\t/g'
+}
+
+[ $default ] && bind_cols && exit 0
+
+
 # ---------------------- Formatting options ----------------------------
-match="$(wc -l $TMP/col[0-9]* | sort -n | awk 'NR==1 {print $NF}')"
-mv $match "$TMP/match" &&
 
-if [ "$keep" = true ]
+[ -z $n_match ] && n_match=$(expr $ncol / 2 + 1)
+
+make_header() {
+    middle="match${delim}n_match${delim}"
+    left=$(expr $n_match - 1 | xargs -i seq {} -1 1 |
+    awk -v x="$delim" '{ printf "L" $0 x "frq_L" $0 x }')
+    right=$(expr $ncol - $n_match | xargs -i seq 1 {} |
+    awk -v x="$delim" '{ printf "R" $0 x "frq_R" $0 x }')
+    echo "$left$middle$right" | sed "s/$delim$//"
+}
+
+format_output() {
+    [ $header ] && make_header
+
+    if [ "$delim" != "$tab" ]
+    then
+	bind_cols |
+	sed -e "s/$delim\t/\"$delim\"$delim/g" \
+	    -e "s/\t/$delim/g"
+    else
+	bind_cols
+    fi
+}
+
+if [ $omit ]
 then
-    match_files="$TMP/col[0-9]* $TMP/match"
+    a=$(expr $n_match + $n_match - 1)
+    b=$(expr $n_match + $n_match)
+    format_output | cut -f$a,$b -d "$delim" --complement
 else
-    match_files="$TMP/col[0-9]*"
+    format_output
 fi
-
-if [ "$delim" != "	" ]
-then
-    paste $match_files |
-    sed "s/$delim[	]/\"$delim\"$delim/g" |
-    sed "s/[[:blank:]]/$delim/g"
-else
-    paste $match_files
-fi
-
-# TODO: figure out how to do table header for asymmetrical concordances
-# should be easy based on $match
 
 # TODO: Feature - test for delimiters in input to pass to cut,
 # e.g. to allow comma separated concordances
 # Shouldn't be too hard to implement
 
 # TODO: Feature - transpose to wide list
+
+# TODO: Add input testing
+
+# TODO: escape if delim quotes
 
 # IMPROVEMENT: figure out why not able to pipe output of cqp tabulate directly
 # > tabulate...> "| this_script" produces wrong results
@@ -91,9 +141,7 @@ fi
 # leads to misaligned columns;
 # known issue with BROWN; "the"; tabulate Last...
 # encoding error of corpus? bug/property of tabulate?
-# could test and remove lines with wc -w too big
-# differences in counts should be minor and random
-# keep=true becomes nonsensical
+# could test and remove lines with wc -w
 
 #-----------------------------------------------------------------------
 # {{{ License
