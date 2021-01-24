@@ -18,14 +18,15 @@ usage() {
 			symbols with special meaning in shell need to be escaped and quoted
 	-l|--list)	out format with collocates ordered alphabetically
 			in first column
+	-P|--perl)	use faster perl implementation;
+                        output is space and tab delimited; formatting options are ignored
 	--help)		view this help file
     "
 }
 
 # ---------------------- Defaults and Options---------------------------
-
 # no dash in argument = no options
-[ $(echo $@ | grep -o - | wc -l) = 0 ] && default=true
+# [ $(echo $@ | grep -o - | wc -l) = 0 ] && default=true
 
 tab=$(printf '\t')
 delim=$tab
@@ -35,6 +36,7 @@ while [ $# -gt 0 ]; do
     -h|--header) header=true; shift ;;
     -o|--omit)   omit=true; shift ;;
     -l|--list)   list=true;         shift ;;
+    -P|--perl)   perl=true;         shift ;;
     -m|--match)  shift; n_match=$1; shift ;;
     -d|--delim)  shift; delim="$1"; shift ;;
     --help)      usage; exit 0 ;;
@@ -56,24 +58,37 @@ TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 prefix="col_"
 
+if [ -z "$perl" ]; then
+  count() {
+    sort | uniq -c | sort -rn \
+      | awk -v x="$delim" '{ print $2 "\t" $1 }'
+  }
+else
+  count() {
+    perl -ne '
+      $count{$_}++;
+      END {
+        print "$count{$_} $_" for sort {
+          $count{$b} <=> $count{$a} || $b cmp $a
+        } keys %count
+      }'
+  }
+fi
 
 # ---------------------- Loop count over columns-------------------------------
-# infer column number from first line
+# infer column number from first line; parallel execution per column
 ncol=$(head -1 $data | wc -w)
 for i in $(seq $ncol); do
-  cut -f $i -d " " $data \
-    | sort | uniq -c | sort -rn \
-    | awk '{ print $2 "\t" $1 }' > $TMP/$prefix$i &
-    # | sed 's/^\s*//' > $TMP/$prefix$i
+  cut -f $i -d " " $data | count > $TMP/$prefix$i &
 done
 wait
 
-# paste inserts 1 separator too few if
+# paste inserts 1 separator too few for files with different lengths
 bind_cols() {
-  paste $TMP/$prefix[0-9]* | sed -e 's/\t\t/\t\t\t/g' -e 's/^\t/\t\t/g'
+  paste $TMP/$prefix[0-9]* | sed 's/\t\t/\t\t\t/g' | sed 's/^\t/\t\t/g'
 }
 
-[ $default ] && bind_cols && exit 0
+[ $perl ] && bind_cols && exit 0
 
 # ---------------------- Formatting options -----------------------------------
 
