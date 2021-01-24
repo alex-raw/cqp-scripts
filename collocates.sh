@@ -2,23 +2,23 @@
 
 usage() {
     echo "
-    Tool to create count-annotated collocation tables based on square, space-delimited input, typically a concordance.
+    Tool to create count-annotated collocation tables from square, space-delimited input, typically a concordance.
     (e.g. from output of CQP tabulate)
     Author: Alexander Rauhut
 
     Usage: $0 [options] infile
 
-	-h|--header)		print header
-	-o|--omit-match)	omit original query match;
-       				use with -m if match is not in the center;
-	-m|--match-position)	provide match position for asymmetrical inputs
-	-d|--delim)		a custom field separator for output;
-				respective string is automatically quoted if it exists in data;
-				strings containing spaces need to be quoted;
-				symbols with special meaning in shell need to be escaped and quoted
-	-l|--list)		out format with collocates ordered alphabetically
-				in first column
-	--help)			view this help file
+	-h|--header)	print header
+	-o|--omit)	omit original query match;
+       			use with -m if match is not in the center;
+	-m|--match)	provide match position for asymmetrical inputs
+	-d|--delim)	a custom field separator for output;
+			respective string is automatically quoted if it exists in data;
+			strings containing spaces need to be quoted;
+			symbols with special meaning in shell need to be escaped and quoted
+	-l|--list)	out format with collocates ordered alphabetically
+			in first column
+	--help)		view this help file
     "
 }
 
@@ -30,96 +30,86 @@ usage() {
 tab=$(printf '\t')
 delim=$tab
 
-while test $# -gt 0; do
-    case "$1" in
-	--help)
-	    usage
-	    exit 0 ;;
-	-h|--header)
-	    shift
-	    header=true ;;
-	-o|--omit-match)
-	    shift
-	    omit=true ;;
-	-m|--match-position)
-	    shift
-	    n_match=$1
-	    shift ;;
-	-d|--delim)
-	    shift
-	    delim="$1"
-	    shift ;;
-	-l|--list)
-	    shift
-	    echo "this option doesn't do anything yet" ;;
-	*)
-	    break ;;
-    esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--header) header=true; shift ;;
+    -o|--omit)   omit=true; shift ;;
+    -l|--list)   list=true;         shift ;;
+    -m|--match)  shift; n_match=$1; shift ;;
+    -d|--delim)  shift; delim="$1"; shift ;;
+    --help)      usage; exit 0 ;;
+    *) break ;;
+  esac
 done
+
+[ $list ] && echo "The list option doesn't do anything yet" && exit 0
+
+# take stdin or file
+data="${1:-/dev/stdin}"
+[ "$data" ] || echo
+
+# hack to handle stdin; see below
+[ "$data" != "$1" ] && cat $data > $TMP/table && data="$TMP/table"
 
 # set up temp directory and make sure it's deleted on any exit
 TMP="$(mktemp -d)"
 trap 'rm -rf -- "$TMP"' EXIT
 prefix="col_"
 
-# take stdin or file
-data="${1:-/dev/stdin}"
 
-# hack to handle stdin; see below
-[ "$data" != "$1" ] && cat $data > $TMP/table && data="$TMP/table"
-
-# ---------------------- Loop count over columns------------------------
-# infer column number from first line and loop
+# ---------------------- Loop count over columns-------------------------------
+# infer column number from first line
 ncol=$(head -1 $data | wc -w)
-for i in $(seq $ncol)
-do
-    cut -f $i -d " " $data |
-    sort | uniq -c | sort -rn |
-    awk '{ print $2 "\t" $1 }' > $TMP/$prefix$i &
+for i in $(seq $ncol); do
+  cut -f $i -d " " $data \
+    | sort | uniq -c | sort -rn \
+    | awk '{ print $2 "\t" $1 }' > $TMP/$prefix$i &
+    # | sed 's/^\s*//' > $TMP/$prefix$i
 done
 wait
 
 # paste inserts 1 separator too few if
 bind_cols() {
-    paste $TMP/$prefix[0-9]* | sed -e 's/\t\t/\t\t\t/g' -e 's/^\t/\t\t/g'
+  paste $TMP/$prefix[0-9]* | sed -e 's/\t\t/\t\t\t/g' -e 's/^\t/\t\t/g'
 }
 
 [ $default ] && bind_cols && exit 0
 
+# ---------------------- Formatting options -----------------------------------
 
-# ---------------------- Formatting options ----------------------------
-
-[ -z $n_match ] && n_match=$(expr $ncol / 2 + 1)
+[ -z $n_match ] && n_match=$(( $ncol / 2 + 1 ))
 
 make_header() {
-    middle="match${delim}n_match${delim}"
-    left=$(expr $n_match - 1 | xargs -i seq {} -1 1 |
-    awk -v x="$delim" '{ printf "L" $0 x "frq_L" $0 x }')
-    right=$(expr $ncol - $n_match | xargs -i seq 1 {} |
-    awk -v x="$delim" '{ printf "R" $0 x "frq_R" $0 x }')
-    echo "$left$middle$right" | sed "s/$delim$//"
+  middle="match${delim}n_match${delim}"
+  left=$(echo $(( $n_match - 1 )) \
+    | xargs -i seq {} -1 1 \
+    | awk -v x="$delim" '{ printf "L" $0 x "frq_L" $0 x }')
+  right=$(echo $(( $ncol - $n_match )) \
+    | xargs -i seq 1 {} \
+    | awk -v x="$delim" '{ printf "R" $0 x "frq_R" $0 x }')
+  echo "$left$middle$right" | sed "s/$delim$//"
 }
 
 format_output() {
-    [ $header ] && make_header
+  [ $header ] && make_header
 
-    if [ "$delim" != "$tab" ]
-    then
-	bind_cols |
-	sed -e "s/$delim\t/\"$delim\"$delim/g" \
-	    -e "s/\t/$delim/g"
-    else
-	bind_cols
-    fi
+  if [ "$delim" != "$tab" ]; then
+    # escape quotes; quote delim in input; replace default \t with delim
+    bind_cols \
+      | sed -e 's/\"/\\"/g' \
+      -e "s/$delim\t/\"$delim\"$delim/g" \
+      -e "s/\t/$delim/g"
+  else
+    bind_cols
+  fi
 }
 
-if [ $omit ]
-then
-    a=$(expr $n_match + $n_match - 1)
-    b=$(expr $n_match + $n_match)
-    format_output | cut -f$a,$b -d "$delim" --complement
+if [ $omit ]; then
+  a=$(( $n_match + $n_match - 1 ))
+  b=$(( $n_match + $n_match ))
+  format_output | cut -f$a,$b -d "$delim" --complement
 else
-    format_output
+  format_output
 fi
 
 # TODO: Feature - test for delimiters in input to pass to cut,
@@ -129,8 +119,6 @@ fi
 # TODO: Feature - transpose to wide list
 
 # TODO: Add input testing
-
-# TODO: escape if delim quotes
 
 # IMPROVEMENT: figure out why not able to pipe output of cqp tabulate directly
 # > tabulate...> "| this_script" produces wrong results

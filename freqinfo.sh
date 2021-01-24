@@ -1,11 +1,6 @@
-#!/usr/bin/env bash
+#!/usr/bin/env sh
 
-__ScriptVersion="0.0.9999"
-
-#-----------------------------------------------------------------------
-#  Display usage information.
-usage()
-{
+usage() {
 echo "CQP wrapper script to print frequency info, and basic productivity measures for a query.
 Author: Alexander Rauhut
 
@@ -32,49 +27,41 @@ Author: Alexander Rauhut
       case-insensitive counts of case insensitive query
 
       $0 -o freqlist.txt BNC '[word = ".+ity"]'
-      kepp frequency list
+      keep frequency list
 
       $0 -o freqlist.txt BNC '[word = ".+ity"]' > freqinfo.txt
       save frequency list in freqlist.txt and script output in freqinfo.txt
 
-      $0 -p BNC'[word = ".+ity"]'
-      print command used by script in output
+      $0 -p -q BNC'[word = ".+ity"]'
+      print command used by script in output; suppress waiting message
       "
 }
 
 # Waiting message
-waiting ()
-{
-echo "...Processing
-$cqp_command
-
+waiting () {
+echo "...Processing\n$cqp_command\n\n
 This might take a while depending on corpus size and query complexity
 Try ctrl+c to exit; if process is stuck, press ctrl+\\
 (German keyboard: AltGr+Strg+ß)
 "
 }
 
-#-----------------------------------------------------------------------
-# Handle command line arguments
+# ---------------------- Defaults and Options---------------------------
 
-while getopts "hvo:pf:cdq" opt
-do
-    case $opt in
-	h|help       )  usage; exit 0   ;;
-	v|version    )  echo "$0 -- Version $__ScriptVersion"; exit 0   ;;
-	o|outfile    )  file="$OPTARG" ;;
-	p|print      )  print=true  ;;
-	c|case       )  case="c" ;;
-	d|diacritics )  diacritics="d" ;;
-	q|quiet      )  quiet=true ;;
-	* )  echo -e "\n  Option does not exist : $OPTARG\n"
-	    usage; exit 1   ;;
-    esac
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -o|--outfile    )  shift; file="$1"; shift ;;
+    -p|--print      )  print=true; shift  ;;
+    -c|--case       )  case="c"; shift  ;;
+    -d|--diacritics )  diacritics="d"; shift  ;;
+    -q|--quiet      )  quiet=true; shift  ;;
+    -h|--help       )  usage; exit 0   ;;
+    * ) break ;;
+  esac
 done
-shift $(($OPTIND-1))
 
 # input testing
-[ $# -eq 1 ] && echo Missing argument. Try "hapax -h" for more information. && exit 1
+[ $# -lt 2 ] && echo "Missing argument. Try "$0 -h" for more information." && exit 1
 [ "$(echo $2 | grep -c "]")" -eq 0 ] && echo "Syntax error parsing query: missing ];
 Did you forget to enclose your query in single quotes?" && exit 1
 [ "$(echo $2 | grep -c "\"")" -eq 0 ] && echo "Syntax error parsing query: missing \";
@@ -100,8 +87,7 @@ cqp_command="$corpus; A=$query; tabulate A match[0]..matchend[0] $attr $fold;"
 #-----------------------------------------------------------------------
 # TODO: add feature: arbitrary amounts of query options and output as table?
 freq () {
-    arg=$1
-    wc -l $1 | cut -f1 -d " "
+  wc -l $1 | cut -f1 -d " "
 }
 
 [ $quiet ] || waiting >/dev/stderr
@@ -134,10 +120,10 @@ HTR\t%f
 
 # if outfile do sort decreasing; otherwise clean tmp files
 if [ -z $file ]; then
-    rm $tmp
+  rm $tmp
 else
-    sort -nr $tmp > $file && rm $tmp
-    [ $quiet ] || echo "Frequency list written to file: $file " >/dev/stderr
+  sort -nr $tmp > $file && rm $tmp
+  [ $quiet ] || echo "Frequency list written to file: $file " >/dev/stderr
 fi
 
 rm /tmp/hpx_tmp
