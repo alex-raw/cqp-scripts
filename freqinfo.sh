@@ -12,10 +12,11 @@ Author: Alexander Rauhut
 
       Options:
       -h|help        Display this message
+      -p|pipe        Pipe tabulated output into command
       -o|outfile     Specify file to capture frequency list used to calculate table
       -c|case        Ignore Case (%c)
       -d|diacritics  Ignore Diacritics (%d)
-      -p|print       Print cqp command used
+      -e|echo        Print cqp command used
       -q|quiet       Suppress progress messages
       -v|version     Display version
 
@@ -51,11 +52,12 @@ Try ctrl+c to exit; if process is stuck, press ctrl+\\
 while [ $# -gt 0 ]; do
   case "$1" in
     -o|--outfile    )  shift; file="$1"; shift ;;
-    -p|--print      )  print=true; shift  ;;
+    -p|--pipe       )  pipe=true; shift  ;;
+    -e|--echo       )  print=true; shift  ;;
     -c|--case       )  case="c"; shift  ;;
     -d|--diacritics )  diacritics="d"; shift  ;;
     -q|--quiet      )  quiet=true; shift  ;;
-    -h|--help       )  usage; exit 0   ;;
+    -h|--help       )  usage; exit 0 ;;
     * ) break ;;
   esac
 done
@@ -77,7 +79,11 @@ corpus=$1
 query=$2
 attr=$3
 [ -z "$attr" ] && attr="word"
-tmp="/tmp/freq.tmp"
+tmp="$(mktemp -d)"
+tmp_file=$tmp/freqinfo
+trap 'rm -rf -- "$tmp"' EXIT
+
+# TODO: accept piped tabulate output
 
 # TODO: add query constructor to allow multiple ATTRIBUTES
 cqp_command="$corpus; A=$query; tabulate A match[0]..matchend[0] $attr $fold;"
@@ -86,26 +92,24 @@ cqp_command="$corpus; A=$query; tabulate A match[0]..matchend[0] $attr $fold;"
 
 #-----------------------------------------------------------------------
 # TODO: add feature: arbitrary amounts of query options and output as table?
+
+[ $quiet ] || waiting >&2
+echo "$cqp_command" | cqp -c | sed 1d > $tmp_file
+
 freq () {
   wc -l $1 | cut -f1 -d " "
 }
 
-[ $quiet ] || waiting >/dev/stderr
-
-# create temporary cqp batchfile because cqp -c is a bit buggy (3.0.0)
-echo "$cqp_command" > /tmp/hpx_tmp
-
-cqp -f /tmp/hpx_tmp > $tmp
-
 # token count; FIXME: Bug, sometimes values after $token 0
 size="$(echo "$corpus; info;" | cqp -c | grep -Po "(?<=Size:    ).*")"
-tokens=$(freq $tmp)
-hapaxes=$(sort $tmp | uniq -c | tee $tmp | grep " 1 " | freq)
-types=$(freq $tmp)
+tokens=$(freq $tmp_file)
+hapaxes=$(sort $tmp_file | uniq -c | tee $tmp_file | grep " 1 " | freq)
+types=$(freq $tmp_file)
 rel=$(echo "scale=15; $tokens / $size" | bc)
 htr=$(echo "scale=15; $hapaxes / $tokens" | bc)
 ttr=$(echo "scale=15; $types / $tokens" | bc)
 
+[ $types = 0 ] && echo "Error: type count is zero; if query output isn't zero, this is a bug; try again or check query" >&2 && exit 1
 
 # print result
 [ $print ] && echo $cqp_command
@@ -118,15 +122,11 @@ TTR\t%f
 HTR\t%f
 " "$size" "$tokens" "$types" "$hapaxes" "$rel" "$ttr" "$htr"
 
-# if outfile do sort decreasing; otherwise clean tmp files
-if [ -z $file ]; then
-  rm $tmp
-else
-  sort -nr $tmp > $file && rm $tmp
-  [ $quiet ] || echo "Frequency list written to file: $file " >/dev/stderr
+# if outfile do sort decreasing; copy tmp file
+if [ -n "$file" ]; then
+  sort -nr $tmp_file > $file
+  [ $quiet ] || echo "Frequency list written to file: $file " >&2
 fi
-
-rm /tmp/hpx_tmp
 
 # {{{ License
 #
