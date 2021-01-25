@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
 
+# {{{ Usage and argument parsing
 usage() {
     echo "
     Tool to create count-annotated collocation tables from square, space-delimited input, typically a concordance.
@@ -16,6 +17,7 @@ usage() {
 			respective string is automatically quoted if it exists in data;
 			strings containing spaces need to be quoted;
 			symbols with special meaning in shell need to be escaped and quoted
+        -s|--space)  use space as secondary delimiter to separate count from attribute
 	-l|--list)	out format with collocates ordered alphabetically
 			in first column
 	-P|--perl)	use faster perl implementation;
@@ -30,38 +32,46 @@ usage() {
 
 tab=$(printf '\t')
 delim=$tab
+sep=$tab
 
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--header) header=true; shift ;;
-    -o|--omit)   omit=true; shift ;;
-    -l|--list)   list=true;         shift ;;
-    -P|--perl)   perl=true;         shift ;;
-    -m|--match)  shift; n_match=$1; shift ;;
-    -d|--delim)  shift; delim="$1"; shift ;;
+    -o|--omit)   omit=true;   shift ;;
+    -l|--list)   list=true;   shift ;;
+    -P|--perl)   perl=true;   shift ;;
+    -s|--space)  sep=" ";     shift ;;
+    -m|--match)  n_match=$2;  shift; shift ;;
+    -d|--delim)  delim="$2";  shift; shift ;;
     --help)      usage; exit 0 ;;
     *) break ;;
   esac
 done
+# }}}
 
+# input testing
 [ $list ] && echo "The list option doesn't do anything yet" && exit 0
+[ "$sep" != "$delim" ] && [ $header ] &&
+echo "Error: incompatible options; simultaneous use of -h and -s currently not supported" && exit 0
+[ "$sep" != "$delim" ] && [ $omit ] &&
+echo "Error: incompatible options; simultaneous use of -o and -s currently not supported" && exit 0
+
+# set up temp directory and make sure it's deleted on any exit
+tmp="$(mktemp -d)"
+trap 'rm -rf -- "$tmp"' EXIT
+prefix="col_"
 
 # take stdin or file
 data="${1:-/dev/stdin}"
-[ "$data" ] || echo
 
 # hack to handle stdin; see below
-[ "$data" != "$1" ] && cat $data > $TMP/table && data="$TMP/table"
+[ "$data" != "$1" ] && cat $data > $tmp/table && data="$tmp/table"
 
-# set up temp directory and make sure it's deleted on any exit
-TMP="$(mktemp -d)"
-trap 'rm -rf -- "$TMP"' EXIT
-prefix="col_"
-
+# define function to count
 if [ -z "$perl" ]; then
   count() {
     sort | uniq -c | sort -rn \
-      | awk -v x="$delim" '{ print $2 "\t" $1 }'
+      | awk -v x="$sep" '{ print $1 x $2 }'
   }
 else
   count() {
@@ -69,7 +79,7 @@ else
       $count{$_}++;
       END {
         print "$count{$_} $_" for sort {
-          $count{$b} <=> $count{$a} || $b cmp $a
+          $count{$b} <=> $count{$a} || $a cmp $b
         } keys %count
       }'
   }
@@ -79,16 +89,19 @@ fi
 # infer column number from first line; parallel execution per column
 ncol=$(head -1 $data | wc -w)
 for i in $(seq $ncol); do
-  cut -f $i -d " " $data | count > $TMP/$prefix$i &
+  cut -f $i -d " " $data | count > $tmp/$prefix$i &
 done
 wait
 
 # paste inserts 1 separator too few for files with different lengths
 bind_cols() {
-  paste $TMP/$prefix[0-9]* | sed 's/\t\t/\t\t\t/g' | sed 's/^\t/\t\t/g'
+  paste $tmp/$prefix[0-9]* | sed 's/\t\t/\t\t\t/g' | sed 's/^\t/\t\t/g'
 }
 
-[ $perl ] && bind_cols && exit 0
+if [ "$sep" != "$delim" ] && [ $perl ]; then
+  bind_cols
+  exit 0
+fi
 
 # ---------------------- Formatting options -----------------------------------
 
@@ -114,6 +127,8 @@ format_output() {
       | sed -e 's/\"/\\"/g' \
       -e "s/$delim\t/\"$delim\"$delim/g" \
       -e "s/\t/$delim/g"
+  elif [ "$perl" ]; then
+    bind_cols | sed "s/ /\t/g"
   else
     bind_cols
   fi
@@ -127,13 +142,16 @@ else
   format_output
 fi
 
+# {{{ Notes
 # TODO: Feature - test for delimiters in input to pass to cut,
 # e.g. to allow comma separated concordances
 # Shouldn't be too hard to implement
 
-# TODO: Feature - transpose to wide list
+# TODO: Feature - transpose to wide list; separate script?
 
 # TODO: Add input testing
+
+# TODO: header with --space option
 
 # IMPROVEMENT: figure out why not able to pipe output of cqp tabulate directly
 # > tabulate...> "| this_script" produces wrong results
@@ -145,8 +163,10 @@ fi
 # known issue with BROWN; "the"; tabulate Last...
 # encoding error of corpus? bug/property of tabulate?
 # could test and remove lines with wc -w
-
-#-----------------------------------------------------------------------
+# from CQP v3.4.24, the TokenSeparator and AttributeSeparator
+# can be set to TAB or another illegal character (untested)
+# see http://cwb.sourceforge.net/files/CQP_Tutorial/7_1.html
+# }}}
 # {{{ License
 #
 # Tool to create collocation tables with counts
@@ -165,5 +185,4 @@ fi
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-
 # }}}
