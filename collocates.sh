@@ -63,6 +63,7 @@ ncol=$(head -1 $data | wc -w)
 # }}} --------------------------------------------------------------------------
 # {{{ Long list option
 
+# could make faster with same approach as below. don't expect this to be used though
 long_list () {
   awk '{ for(i=1; i<=NF; ++i) print i " " $i } ' "$data" \
     | sort | uniq -c | awk '{ print $2, $1, $3 }'
@@ -83,7 +84,7 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
-# hack to handle stdin; see below
+# buffer data from stdin
 buffer_data() {
   [ "$data" != "$1" ] && cat $data > $tmp/table && data="$tmp/table"
 }
@@ -128,20 +129,6 @@ count_perl() {
         $count{$b} <=> $count{$a} || $a cmp $b
       } keys %count
     }' $1
-}
-
-# only for testing purposes, don't use
-count_awk() {
-awk '
-NR==FNR {
-  for(i = 1; i <= NF; i++) c[i,$i]++; next } {
-  f = line="";
-  for(i = 1; i <= NF; i++) {
-    k = i SUBSEP $i;
-    if (k in c) {
-      f = 1; line = line sprintf("%d %s", c[k],$i); delete c[k]};
-      line = line "\t"}
-      if(f) print line}' $1{,}
 }
 
 # paste doesn't handle ragged multi cols; hard-coded tab as delimiter on purpose
