@@ -19,9 +19,8 @@ usage() {
                         quotation mark existing in the text are escaped with a backslash;
 			strings containing spaces need to be quoted;
 			symbols with special meaning in shell need to be escaped and quoted
-        -s|--space)	use space as secondary delimiter to separate count from attribute
 	-L|--long)	long list with columnNr|frequency|token
-	-P|--perl)	perl implementation of counting function; faster on large data sets
+        -s|--space)	use space as secondary delimiter to separate count from attribute
 	--help)		view this help file
     "
 }
@@ -38,15 +37,12 @@ while [ $# -gt 0 ]; do
   case "$1" in
     -h|--header) header=true; shift ;;
     -o|--omit)   omit=true;   shift ;;
-    -s|--space)  sep=" "; delim="$tab";     shift ;;
-    -m|--match)  n_match=$2;  shift; shift ;;
-    -d|--delim)  delim="$2";  shift; shift ;;
+    -m|--match)  i=$2;  shift; shift ;;
+    -d|--delim)  delim="$2"; sep="$2";  shift; shift ;;
 
+    -s|--space)  sep=" "; delim="$tab";     shift ;;
     -l|--list)   list=true;   shift ;;
-    -e|--experimental)   exp="true";      shift ;;
-    -P|--perl)   perl=true;   shift ;;
-    -L)   long="true";      shift ;;
-    -a)   awk="true";      shift ;;
+    -L|--long)   long="true";      shift ;;
     --help)      usage; exit 0 ;;
     *) break ;;
   esac
@@ -54,7 +50,6 @@ done
 
 # take stdin or file
 data="${1:-/dev/stdin}"
-ncol=$(head -1 $data | wc -w)
 
 # Input testing
 
@@ -84,10 +79,8 @@ fi
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
-# buffer data from stdin
-buffer_data() {
-  [ "$data" != "$1" ] && cat $data > $tmp/table && data="$tmp/table"
-}
+# write data to disk for parallel processing
+[ "$data" != "$1" ] && cat $data > $tmp/table && data="$tmp/table"
 
 # }}} --------------------------------------------------------------------------
 # {{{ Count functions
@@ -95,33 +88,14 @@ buffer_data() {
 # infer column number from first line; parallel execution per column
 file_per_column() {
   count_fun=$1
+  ncol=$(head -1 $data | wc -w)
   for i in $(seq $ncol); do
     cut -f $i -d " " $data | $count_fun > $tmp/${i}out &
   done
   wait
 }
 
-stdin_per_column() {
-  count_fun=$1
-  awk -v tmp="$tmp/" '{ for(i = 1; i <= NF; i++){ print $i > tmp i }}' $data
-  for file in $tmp/*; do
-    $count_fun $file > "${file}out" &
-  done
-  wait
-}
-
-# TODO: remove? runs out of memory
-count_shell() {
-  sort $1 | uniq -c | sort -rn \
-    | awk -v x="$sep" '{ print $1 x $2 }'
-}
-
-count_suniq() {
-  ./huniq -r $1 \
-    | awk -v x="$sep" '{ print $1 x $2 }'
-}
-
-count_perl() {
+count() {
   perl -ne '
     $count{$_}++;
     END {
@@ -131,27 +105,27 @@ count_perl() {
     }' $1
 }
 
+# }}} --------------------------------------------------------------------------
+# {{{ Formatting
+
 # paste doesn't handle ragged multi cols; hard-coded tab as delimiter on purpose
 # (don't shortcut to `-d "$delim"` or formatting breaks)
 bind_cols() {
-  paste $tmp/[0-9]*out | sed "s/\t\t/$sep\t\t/g" | sed "s/^\t/$sep\t/g"
+  paste $tmp/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
 }
 
-# }}} --------------------------------------------------------------------------
-# {{{ Formatting options
+[ -z $i ] && i=$(( ncol / 2 + 1 )) # column index of match
 
-[ -z $n_match ] && n_match=$(( ncol / 2 + 1 ))
-
-# TODO: replace awk with printf
 make_header() {
-  middle="match${sep}n_match${delim}"
-  left=$(echo $(( n_match - 1 )) \
+  match="match${sep}i${delim}"
+  ncol=$(head -1 $data | wc -w)
+  left=$(echo $(( i - 1 )) \
     | xargs -i seq {} -1 1 \
     | awk -v x="$sep" -v y="$delim" '{ printf "L" $0 x "frq_L" $0 y }')
-  right=$(echo $(( ncol - n_match )) \
+  right=$(echo $(( ncol - i )) \
     | xargs -i seq 1 {} \
     | awk -v x="$sep" -v y="$delim" '{ printf "R" $0 x "frq_R" $0 y }')
-  echo "$left$middle$right" | sed "s/$delim$//"
+  echo "$left$match$right" | sed "s/$delim$//g"
 }
 
 format_output() {
@@ -160,9 +134,9 @@ format_output() {
     bind_cols \
       | sed -e 's/\"/\\"/g' \
       -e "s/$delim\t/\"$delim\"$delim/g" \
-      -e "s/\t/$delim/g"
-  elif [ "$sep" != "$delim" ] && [ $perl ]; then
-    bind_cols | sed "s/ /$sep/g"
+      -e "s/[[:blank:]]/$delim/g"
+  elif [ "$sep" != " " ]; then
+    bind_cols | sed "s/ /$delim/g"
   else
     bind_cols
   fi
@@ -170,30 +144,10 @@ format_output() {
 
 # {{{ Execution
 
-if [ $exp ]; then
-  stdin_per_column count_shell
-elif [ $perl ]; then
-  buffer_data
-  file_per_column count_perl
-  # TODO: this needs to go into format_output once -P is default option
-  if [ "$delim" = "$sep" ]; then
-    format_output | sed "s/ /\t/g"
-  else
-    format_output
-  fi
-  # TODO: delete after test
-elif [ $awk ]; then
-  buffer_data
-  count_awk $data
-  exit 0
-else
-  buffer_data
-  file_per_column count_suniq
-fi
+file_per_column count
 
 if [ $omit ]; then
-  a=$(( $n_match + $n_match - 1 ))
-  b=$(( $n_match + $n_match ))
+  a=$(( i + i - 1 )); b=$(( i + i ))
   [ $header ] && make_header | cut -f$a,$b -d "$delim" --complement
   format_output | cut -f$a,$b -d "$delim" --complement
 else
@@ -203,15 +157,15 @@ fi
 
 # }}} --------------------------------------------------------------------------
 # {{{ Notes
-
+#
 # TODO: Feature - test for delimiters in input to pass to cut,
 # e.g. to allow comma separated concordances
 # Shouldn't be too hard to implement
-
+#
 # TODO: Feature - wide list; separate script?
-
+#
 # TODO: Add input testing
-
+#
 # Known issue: doesn't work for spaces inside tokens;
 # leads to misaligned columns;
 # known issue with BROWN; "the"; tabulate Last...
@@ -220,7 +174,7 @@ fi
 # from CQP v3.4.24, the TokenSeparator and AttributeSeparator
 # can be set to TAB or another illegal character (untested)
 # see http://cwb.sourceforge.net/files/CQP_Tutorial/7_1.html
-
+#
 # }}} --------------------------------------------------------------------------
 # {{{ License
 #

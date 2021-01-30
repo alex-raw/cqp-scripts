@@ -102,6 +102,8 @@ freq () {
 
 # token count; FIXME: Bug, sometimes values after $token 0
 size="$(echo "$corpus; info;" | cqp -c | grep -Po "(?<=Size:    ).*")"
+#TODO: replace with:
+size="$(cwb-lexdecode -S BNC-BABY | head -1 | grep -oz "[0-9]")"
 tokens=$(freq $tmp_file)
 hapaxes=$(sort $tmp_file | uniq -c | tee $tmp_file | grep " 1 " | freq)
 types=$(freq $tmp_file)
