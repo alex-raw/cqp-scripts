@@ -1,30 +1,37 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
-# corpus size
-n="$(cwb-lexdecode -S BROWN | head -1 | grep -oz "[0-9]")"
+tmp="$(mktemp -d)"
+trap 'rm -rf -- "$tmp"' EXIT
+cd $tmp
 
-# get list of words and their text_id \
-#  | count words per text_id | get rid of p-attribute name \
-#  | alphabetical sort for later join | save as temp file
-#  | get part sizes | make them proportions
-# FIXME: yikes! need to fill in parts where word doesn't occur
+corpus=$1; p_attr=$2; s_attr=$3
 
-cwb-decode BROWN -P word -S text_id \
-  | sort | uniq -c | sed 's/word=//g' \
-  | sort -k3 | tee per_part \
-  | cut -f2 | sort | uniq -c \
-  | awk -M -v n=$n '{ print $1 / n, $2 }' > parts
+# -C option would be great, but filters most s-attributes
+cwb-scan-corpus -o freq_list "$corpus" "$p_attr" "$s_attr"
 
-# replace corpus part names with their size
-join -1 3 -2 2 -o 1.2 1.1 2.1 per_part parts > master_table
+# sort for join; using buffer file piping directly into sort is 20% slower
+sort -k3 freq_list > freqs_sort
+cut -f1 freqs_sort > freqs &
+cut -f2 freqs_sort > vocab &
 
-# annotate words with their frequency
-cut -f1 -d " " master_table \
-  | cwb-lexdecode -f0 -P word -F - BROWN \
-  | awk '{print $1}' \
-  | paste -d " " master_table - > final_table
+n="$(cwb-lexdecode -S "$corpus" | sed -n '1s/[^0-9]//gp')"
+cwb-s-decode "$corpus" -S "$s_attr" | awk -v n=$n '{print ($2-$1+1) / n, $3}' \
+  | sort -k2 | join -1 3 -2 2 -o 2.1 freqs_sort - > parts_perc
 
-# calculate (v / f) - s
-awk '{print $1, ($2 / $4) - $3}' final_table | less
+rm freqs_sort freq_list &
 
-# TODO: check for precision errors
+sum_by_key() {
+  awk '{arr[$1] += $2} END {for (i in arr) print i,arr[i]}'
+}
+
+paste vocab parts_perc | sum_by_key \
+  | awk '{print 1 - $2}' > not_parts_perc &
+
+cwb-lexdecode -f0 -P "$p_attr" -F vocab "$corpus" | awk '{print $1}' \
+  | paste freqs - parts_perc | awk '{print ($1 / $2) - $3}' | sed 's/^-//g' \
+  | paste vocab - | sum_by_key \
+  | paste - not_parts_perc | awk '{print $1, ($2 + $3) / 2}' \
+  | sort -n -k2
+
+# # split into one file per part
+# sort -k3 corp | awk '!($3 in arr) {arr[$3]=++i} {print $2, $1 > ("part_" $3)}'
