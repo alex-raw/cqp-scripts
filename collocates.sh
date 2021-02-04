@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -eo pipefail
+
 # {{{ Usage
 
 usage() {
@@ -159,7 +161,7 @@ fi
 # {{{ Notes
 #
 # TODO: Feature - test for delimiters in input to pass to cut,
-# e.g. to allow comma separated concordances
+# e.g. to allow tab or comma separated concordances
 # Shouldn't be too hard to implement
 #
 # TODO: Feature - wide list; separate script?
