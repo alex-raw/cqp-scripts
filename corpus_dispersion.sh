@@ -27,7 +27,7 @@ rm freq_list &
 
 # s = n_part / n; +1 due to 0-indexing; \ annotate list with s
 cwb-s-decode "$corpus" -S "$s_attr" \
-  | awk -v n=$n '{x[$3] += $2-$1+1} END {for (i in x) print x[i] / n, i}' \
+  | awk -v n="$n" '{x[$3] += $2-$1+1} END {for (i in x) print x[i] / n, i}' \
   | sort -k2 | join -1 3 -2 2 -o 2.1 freqs_sort - > parts_perc
 rm freqs_sort &
 

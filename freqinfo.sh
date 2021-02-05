@@ -12,7 +12,6 @@ Author: Alexander Rauhut
 
       Options:
       -h|help        Display this message
-      -p|pipe        Pipe tabulated output into command
       -o|outfile     Specify file to capture frequency list used to calculate table
       -c|case        Ignore Case (%c)
       -d|diacritics  Ignore Diacritics (%d)
@@ -40,10 +39,10 @@ Author: Alexander Rauhut
 
 # Waiting message
 waiting () {
-echo "...Processing\n$cqp_command\n\n
+printf "...Processing\n$cqp_command\n\n
 This might take a while depending on corpus size and query complexity
 Try ctrl+c to exit; if process is stuck, press ctrl+\\
-(German keyboard: AltGr+Strg+ß)
+(German keyboard: AltGr+Strg+ß)\n
 "
 }
 
@@ -52,7 +51,6 @@ Try ctrl+c to exit; if process is stuck, press ctrl+\\
 while [ $# -gt 0 ]; do
   case "$1" in
     -o|--outfile    )  shift; file="$1"; shift ;;
-    -p|--pipe       )  pipe=true; shift  ;;
     -e|--echo       )  print=true; shift  ;;
     -c|--case       )  case="c"; shift  ;;
     -d|--diacritics )  diacritics="d"; shift  ;;
@@ -63,10 +61,10 @@ while [ $# -gt 0 ]; do
 done
 
 # input testing
-[ $# -lt 2 ] && echo "Missing argument. Try "$0 -h" for more information." && exit 1
-[ "$(echo $2 | grep -c "]")" -eq 0 ] && echo "Syntax error parsing query: missing ];
+[ $# -lt 2 ] && echo "Missing argument. Try "$0" -h for more information." && exit 1
+[ "$(echo "$2" | grep -c "]")" -eq 0 ] && echo "Syntax error parsing query: missing ];
 Did you forget to enclose your query in single quotes?" && exit 1
-[ "$(echo $2 | grep -c "\"")" -eq 0 ] && echo "Syntax error parsing query: missing \";
+[ "$(echo "$2" | grep -c "\"")" -eq 0 ] && echo "Syntax error parsing query: missing \";
 Did you forget to enclose your query in single quotes?" && exit 1
 
 # ----------------------------------------------------------------------
@@ -75,20 +73,20 @@ Did you forget to enclose your query in single quotes?" && exit 1
 [ -z "$diacritics" ] && [ -z "$case" ] || fold="%$case$diacritics"
 
 # setting up values
-corpus=$1
-query=$2
-attr=$3
+corpus="$1"
+query="$2"
+attr="$3"
 [ -z "$attr" ] && attr="word"
 tmp="$(mktemp -d)"
-tmp_file=$tmp/freqinfo
+tmp_file="$tmp"/freqinfo
 trap 'rm -rf -- "$tmp"' EXIT
 
 # TODO: accept piped tabulate output
 
 # TODO: add query constructor to allow multiple ATTRIBUTES
-cqp_command="$corpus; A=$query; tabulate A match[0]..matchend[0] $attr $fold;"
+cqp_command=""$corpus"; A="$query"; tabulate A match[0]..matchend[0] "$attr" "$fold";"
 
-[ -n "$(echo $cqp_command | grep -Po "%\w+ %")" ] && echo "Error: use either the -c/-d flag or specify %c/%d in the ATTRIBUTE argument" && exit 1
+[ "$(echo "$cqp_command" | grep -Pq "%\w+ %")" ] && echo "Error: use either the -c/-d flag or specify %c/%d in the ATTRIBUTE argument" && exit 1
 
 #-----------------------------------------------------------------------
 # TODO: add feature: arbitrary amounts of query options and output as table?
@@ -96,25 +94,22 @@ cqp_command="$corpus; A=$query; tabulate A match[0]..matchend[0] $attr $fold;"
 [ $quiet ] || waiting >&2
 echo "$cqp_command" | cqp -c | sed 1d > $tmp_file
 
-freq () {
-  wc -l $1 | cut -f1 -d " "
-}
+freq () { wc -l $1 | cut -f1 -d " " ; }
 
 # token count; FIXME: Bug, sometimes values after $token 0
-size="$(echo "$corpus; info;" | cqp -c | grep -Po "(?<=Size:    ).*")"
-#TODO: replace with:
-size="$(cwb-lexdecode -S BNC-BABY | head -1 | grep -oz "[0-9]")"
-tokens=$(freq $tmp_file)
-hapaxes=$(sort $tmp_file | uniq -c | tee $tmp_file | grep " 1 " | freq)
-types=$(freq $tmp_file)
+# replace with lexdecode -F annotation
+size="$(cwb-lexdecode -S BNC | sed -n '1s/[^0-9]//gp')"
+tokens=$(freq "$tmp_file")
+hapaxes=$(sort "$tmp_file" | uniq -c | tee "$tmp_file" | grep " 1 " | freq)
+types=$(freq "$tmp_file")
 rel=$(echo "scale=15; $tokens / $size" | bc)
 htr=$(echo "scale=15; $hapaxes / $tokens" | bc)
 ttr=$(echo "scale=15; $types / $tokens" | bc)
 
-[ $types = 0 ] && echo "Error: type count is zero; if query output isn't zero, this is a bug; try again or check query" >&2 && exit 1
+[ "$types" = 0 ] && echo "Error: type count is zero; if query output isn't zero, this is a bug; try again or check query" >&2 && exit 1
 
 # print result
-[ $print ] && echo $cqp_command
+[ "$print" ] && echo "$cqp_command"
 printf "N \t%d
 Tokens\t%d
 Types\t%d
@@ -126,8 +121,8 @@ HTR\t%f
 
 # if outfile do sort decreasing; copy tmp file
 if [ -n "$file" ]; then
-  sort -nr $tmp_file > $file
-  [ $quiet ] || echo "Frequency list written to file: $file " >&2
+  sort -nr "$tmp_file" > "$file"
+  [ $quiet ] || echo "Frequency list written to file: $file" >&2
 fi
 
 # {{{ License

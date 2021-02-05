@@ -67,7 +67,7 @@ long_list () {
 }
 
 if [ $long ]; then
-  if [ $(echo $@ | grep -o - | wc -l) > 2 ]; then
+  if [ "$(echo "$@" | grep -o - | wc -l)" -gt 2 ]; then
     echo "Warning: the --long option currently ignores all other formatting options"
   fi
   long_list
@@ -82,7 +82,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
 # write data to disk for parallel processing
-[ "$data" != "$1" ] && cat $data > $tmp/table && data="$tmp/table"
+[ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
 
 # }}} --------------------------------------------------------------------------
 # {{{ Count functions
@@ -90,9 +90,9 @@ trap 'rm -rf -- "$tmp"' EXIT
 # infer column number from first line; parallel execution per column
 file_per_column() {
   count_fun=$1
-  ncol=$(head -1 $data | wc -w)
-  for i in $(seq $ncol); do
-    cut -f $i -d " " $data | $count_fun > $tmp/${i}out &
+  ncol=$(head -1 "$data" | wc -w)
+  for i in $(seq "$ncol"); do
+    cut -f "$i" -d " " "$data" | "$count_fun" > "$tmp"/"${i}"out &
   done
   wait
 }
@@ -104,7 +104,7 @@ count() {
       print "$count{$_} $_" for sort {
         $count{$b} <=> $count{$a} || $a cmp $b
       } keys %count
-    }' $1
+    }' "$1"
 }
 
 # }}} --------------------------------------------------------------------------
@@ -113,14 +113,14 @@ count() {
 # paste doesn't handle ragged multi cols; hard-coded tab as delimiter on purpose
 # (don't shortcut to `-d "$delim"` or formatting breaks)
 bind_cols() {
-  paste $tmp/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
+  paste "$tmp"/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
 }
 
-[ -z $i ] && i=$(( ncol / 2 + 1 )) # column index of match
+[ -z "$i" ] && i=$(( ncol / 2 + 1 )) # column index of match
 
 make_header() {
   match="match${sep}i${delim}"
-  ncol=$(head -1 $data | wc -w)
+  ncol=$(head -1 "$data" | wc -w)
   left=$(echo $(( i - 1 )) \
     | xargs -i seq {} -1 1 \
     | awk -v x="$sep" -v y="$delim" '{ printf "L" $0 x "frq_L" $0 y }')
