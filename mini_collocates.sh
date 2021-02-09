@@ -10,10 +10,9 @@ tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
 # infer column number from first line; parallel execution per column
 ncol=$(head -1 "$data" | wc -w)
 for i in $(seq "$ncol"); do
-  cut -f "$i" -d " " "$data" | perl -ne '
-  $count{$_}++; END { print "$count{$_} $_" for sort {
-              $count{$b} <=> $count{$a} || $a cmp $b
-            } keys %count }' > "$tmp"/"${i}"out &
+  cut -f "$i" -d " " "$data" | awk '
+  { f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }
+  ' | sort -nr > "$tmp"/"${i}"out &
 done
 wait
 

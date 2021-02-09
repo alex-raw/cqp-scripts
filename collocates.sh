@@ -21,7 +21,6 @@ usage() {
                         quotation mark existing in the text are escaped with a backslash;
 			strings containing spaces need to be quoted;
 			symbols with special meaning in shell need to be escaped and quoted
-	-L|--long)	long list with columnNr|frequency|token
         -s|--space)	use space as secondary delimiter to separate count from attribute
 	--help)		view this help file
     "
@@ -38,77 +37,46 @@ sep="$tab"
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--header) header=true; shift ;;
-    -o|--omit)   omit=true;   shift ;;
-    -m|--match)  i=$2;  shift; shift ;;
-    -d|--delim)  delim="$2"; sep="$2";  shift; shift ;;
-
-    -s|--space)  sep=" "; delim="$tab";     shift ;;
-    -l|--list)   list=true;   shift ;;
-    -L|--long)   long="true";      shift ;;
+    -d|--delim)  delim="$2"; sep="$2"; shift; shift ;;
+    -s|--space)  sep=" "; delim="$tab"; shift ;;
+    -m|--match)  match_i=$2; shift; shift ;;
+    -o|--omit)   omit=true; shift ;;
+    -l|--list)   list=true; shift ;;
     --help)      usage; exit 0 ;;
     *) break ;;
   esac
 done
 
-# take stdin or file
+# take stdin or file; write data to disk for parallel processing
 data="${1:-/dev/stdin}"
+[ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
 
 # Input testing
-
 [ "$list" ] && echo "The -l|--list option doesn't do anything yet" && exit 1
-
-# }}} --------------------------------------------------------------------------
-# {{{ Long list option
-
-# could make faster with same approach as below. don't expect this to be used though
-long_list () {
-  awk '{ for(i=1; i<=NF; ++i) print i " " $i } ' "$data" \
-    | sort | uniq -c | awk '{ print $2, $1, $3 }'
-}
-
-if [ $long ]; then
-  if [ "$(echo "$@" | grep -o - | wc -l)" -gt 2 ]; then
-    echo "Warning: the --long option currently ignores all other formatting options"
-  fi
-  long_list
-  exit 0
-fi
-
-# }}} --------------------------------------------------------------------------
-# {{{ Handling temporary files
 
 # set up temp directory and make sure it's deleted on any exit
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
-# write data to disk for parallel processing
-[ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
+# infer column number from first line
+ncol=$(head -1 "$data" | wc -w)
+[ $match_i ] || match_i=$(( ncol / 2 + 1 )) # column index of match
 
 # }}} --------------------------------------------------------------------------
-# {{{ Count functions
+# {{{ Main functions
 
-# infer column number from first line; parallel execution per column
+count() {
+  awk '{ f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }' | sort -nr
+}
+
+# parallel execution per column
 file_per_column() {
   count_fun=$1
-  ncol=$(head -1 "$data" | wc -w)
   for i in $(seq "$ncol"); do
     cut -f "$i" -d " " "$data" | "$count_fun" > "$tmp"/"${i}"out &
   done
   wait
 }
-
-count() {
-  perl -ne '
-    $count{$_}++;
-    END {
-      print "$count{$_} $_" for sort {
-        $count{$b} <=> $count{$a} || $a cmp $b
-      } keys %count
-    }' "$1"
-}
-
-# }}} --------------------------------------------------------------------------
-# {{{ Formatting
 
 # paste doesn't handle ragged multi cols; hard-coded tab as delimiter on purpose
 # (don't shortcut to `-d "$delim"` or formatting breaks)
@@ -116,18 +84,15 @@ bind_cols() {
   paste "$tmp"/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
 }
 
-[ -z "$i" ] && i=$(( ncol / 2 + 1 )) # column index of match
+# }}} --------------------------------------------------------------------------
+# {{{ Additional formatting
 
 make_header() {
-  match="match${sep}i${delim}"
-  ncol=$(head -1 "$data" | wc -w)
-  left=$(echo $(( i - 1 )) \
-    | xargs -i seq {} -1 1 \
-    | awk -v x="$sep" -v y="$delim" '{ printf "L" $0 x "frq_L" $0 y }')
-  right=$(echo $(( ncol - i )) \
-    | xargs -i seq 1 {} \
-    | awk -v x="$sep" -v y="$delim" '{ printf "R" $0 x "frq_R" $0 y }')
-  echo "$left$match$right" | sed "s/$delim$//g"
+  echo | awk -v x="$sep" -v y="$delim" -v ncol=$ncol -v m=$match_i '
+    { for (i = m - 1; i >= 1; i--) printf "L" i x "frq_L" i y;
+      printf "M" x "frq_M" y;
+      for (i = 1; i <= ncol - m; i++) printf "R" i x "frq_R" i y
+    } END {printf "\n"}' | sed "s/.$//g"
 }
 
 format_output() {
@@ -135,8 +100,8 @@ format_output() {
     # escape quotes; quote delim in input; replace default \t with delim
     bind_cols \
       | sed -e 's/\"/\\"/g' \
-      -e "s/$delim\t/\"$delim\"$delim/g" \
-      -e "s/[[:blank:]]/$delim/g"
+            -e "s/$delim\t/\"$delim\"$delim/g" \
+            -e "s/[[:blank:]]/$delim/g"
   elif [ "$sep" != " " ]; then
     bind_cols | sed "s/ /$delim/g"
   else
@@ -144,12 +109,13 @@ format_output() {
   fi
 }
 
+# }}} --------------------------------------------------------------------------
 # {{{ Execution
 
 file_per_column count
 
 if [ $omit ]; then
-  a=$(( i + i - 1 )); b=$(( i + i ))
+  a=$(( match_i * 2 - 1 )); b=$(( match_i * 2 ))
   [ $header ] && make_header | cut -f$a,$b -d "$delim" --complement
   format_output | cut -f$a,$b -d "$delim" --complement
 else
@@ -160,10 +126,6 @@ fi
 # }}} --------------------------------------------------------------------------
 # {{{ Notes
 #
-# TODO: Feature - test for delimiters in input to pass to cut,
-# e.g. to allow tab or comma separated concordances
-# Shouldn't be too hard to implement
-#
 # TODO: Feature - wide list; separate script?
 #
 # TODO: Add input testing
@@ -171,7 +133,6 @@ fi
 # Known issue: doesn't work for spaces inside tokens;
 # leads to misaligned columns;
 # known issue with BROWN; "the"; tabulate Last...
-# encoding error of corpus? bug/property of tabulate?
 # could test and remove lines with wc -w
 # from CQP v3.4.24, the TokenSeparator and AttributeSeparator
 # can be set to TAB or another illegal character (untested)
