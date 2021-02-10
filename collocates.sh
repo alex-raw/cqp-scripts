@@ -18,8 +18,8 @@ usage() {
 	-m|--match)	provide match position for asymmetrical inputs
 	-d|--delim)	a custom field separator for output;
 			respective string is automatically quoted if it exists in data;
-                        quotation mark existing in the text are escaped with a backslash;
-			strings containing spaces need to be quoted;
+                        quotation marks embedded in the text are escaped with a backslash;
+			delimiters containing spaces need to be quoted;
 			symbols with special meaning in shell need to be escaped and quoted
         -s|--space)	use space as secondary delimiter to separate count from attribute
 	--help)		view this help file
@@ -47,16 +47,16 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-# take stdin or file; write data to disk for parallel processing
+# set up temp directory and make sure it's deleted on any exit
+tmp="$(mktemp -d)"
+trap 'rm -rf -- "$tmp"' EXIT
+
+# take stdin or file; buffer data on disk for parallel processing
 data="${1:-/dev/stdin}"
 [ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
 
 # Input testing
 [ "$list" ] && echo "The -l|--list option doesn't do anything yet" && exit 1
-
-# set up temp directory and make sure it's deleted on any exit
-tmp="$(mktemp -d)"
-trap 'rm -rf -- "$tmp"' EXIT
 
 # infer column number from first line
 ncol=$(head -1 "$data" | wc -w)
@@ -78,7 +78,8 @@ file_per_column() {
   wait
 }
 
-# paste doesn't handle ragged multi cols; hard-coded tab as delimiter on purpose
+# paste doesn't handle ragged multi cols;
+# hard-coded tab as temporary delimiter on purpose
 # (don't shortcut to `-d "$delim"` or formatting breaks)
 bind_cols() {
   paste "$tmp"/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
