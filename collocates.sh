@@ -22,6 +22,7 @@ usage() {
 			delimiters containing spaces need to be quoted;
 			symbols with special meaning in shell need to be escaped and quoted
         -s|--space)	use space as secondary delimiter to separate count from attribute
+        --mawk)		use faster mawk interpreter to get counts
 	--help)		view this help file
     "
 }
@@ -42,6 +43,7 @@ while [ $# -gt 0 ]; do
     -m|--match)  match_i=$2; shift; shift ;;
     -o|--omit)   omit=true; shift ;;
     -l|--list)   list=true; shift ;;
+    --mawk)      mawk=true; shift ;;
     --help)      usage; exit 0 ;;
     *) break ;;
   esac
@@ -58,15 +60,16 @@ data="${1:-/dev/stdin}"
 # Input testing
 [ "$list" ] && echo "The -l|--list option doesn't do anything yet" && exit 1
 
-# infer column number from first line
-ncol=$(head -1 "$data" | wc -w)
+# infer column number from 10th line; see NOTE2 below
+ncol=$(head -10 "$data" | tail -1 | wc -w)
 [ $match_i ] || match_i=$(( ncol / 2 + 1 )) # column index of match
 
 # }}} --------------------------------------------------------------------------
 # {{{ Main functions
 
+[ $mawk ] && awk_cmd="mawk" || awk_cmd="awk"
 count() {
-  awk '{ f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }' | sort -nr
+  $awk_cmd '{ f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }' | sort -nr
 }
 
 # parallel execution per column
@@ -131,6 +134,7 @@ fi
 #
 # TODO: Add input testing
 #
+# NOTE1:
 # Known issue: doesn't work for spaces inside tokens;
 # leads to misaligned columns;
 # known issue with BROWN; "the"; tabulate Last...
@@ -138,6 +142,12 @@ fi
 # from CQP v3.4.24, the TokenSeparator and AttributeSeparator
 # can be set to TAB or another illegal character (untested)
 # see http://cwb.sourceforge.net/files/CQP_Tutorial/7_1.html
+#
+# NOTE2:
+# Using 10th line to infer column number because output of cqp tabulate
+# is not aligned if one of the matches k words away from the beginning or end
+# of the corpus where k is the range;
+# 10 is arbitrary but save without much overhead
 #
 # }}} --------------------------------------------------------------------------
 # {{{ License
