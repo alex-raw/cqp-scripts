@@ -12,6 +12,7 @@ usage() {
 
     Usage: $0 [options] infile
 
+	-c|--casefold)	ignore case when counting
 	-h|--header)	print header
 	-o|--omit)	omit original query match;
        			use with -m if match is not in the center;
@@ -37,14 +38,15 @@ sep="$tab"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--header) header=true; shift ;;
-    -d|--delim)  delim="$2"; sep="$2"; shift; shift ;;
-    -s|--space)  sep=" "; delim="$tab"; shift ;;
-    -m|--match)  match_i=$2; shift; shift ;;
-    -o|--omit)   omit=true; shift ;;
-    -l|--list)   list=true; shift ;;
-    --mawk)      mawk=true; shift ;;
-    --help)      usage; exit 0 ;;
+    -c|--casefold) case=true; shift ;;
+    -h|--header)   header=true; shift ;;
+    -d|--delim)    delim="$2"; sep="$2"; shift; shift ;;
+    -s|--space)    sep=" "; delim="$tab"; shift ;;
+    -m|--match)    match_i=$2; shift; shift ;;
+    -o|--omit)     omit=true; shift ;;
+    -l|--list)     list=true; shift ;;
+    --mawk)        mawk=true; shift ;;
+    --help)        usage; exit 0 ;;
     *) break ;;
   esac
 done
@@ -74,12 +76,14 @@ count() {
 
 # parallel execution per column
 file_per_column() {
-  count_fun=$1
+  fun=$1
   for i in $(seq "$ncol"); do
-    cut -f "$i" -d " " "$data" | "$count_fun" > "$tmp"/"${i}"out &
+    cut -f "$i" -d " " "$data" | "$fun" > "$tmp"/"${i}"out &
   done
   wait
 }
+
+fold_case() { tr "[:upper:]" "[:lower:]" ; }
 
 # paste doesn't handle ragged multi cols;
 # hard-coded tab as temporary delimiter on purpose
@@ -116,7 +120,13 @@ format_output() {
 # }}} --------------------------------------------------------------------------
 # {{{ Execution
 
-file_per_column count
+if [ $case ]; then
+  get_freqs() { fold_case | count ; }
+else
+  get_freqs() { count ; }
+fi
+
+file_per_column get_freqs
 
 if [ $omit ]; then
   a=$(( match_i * 2 - 1 )); b=$(( match_i * 2 ))
