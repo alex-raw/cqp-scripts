@@ -5,27 +5,26 @@ set -eo pipefail
 # {{{ Usage
 
 usage() {
-    echo "
-    Tool to create count-annotated collocation tables from square, space-delimited input, typically a concordance.
-    (e.g. from output of CQP tabulate)
+echo "DESCRIPTION
+    Tool to create count-annotated collocation tables from square, space-delimited input,
+    typically a concordance (e.g. from output of CQP tabulate).
     Author: Alexander Rauhut
 
-    Usage: $0 [options] infile
+USAGE
+    [<stdin>] $0 [options] [infile]
 
-	-c|--casefold)	ignore case when counting
-	-h|--header)	print header
-	-o|--omit)	omit original query match;
-       			use with -m if match is not in the center;
-	-m|--match)	provide match position for asymmetrical inputs
-	-d|--delim)	a custom field separator for output;
-			respective string is automatically quoted if it exists in data;
-                        quotation marks embedded in the text are escaped with a backslash;
-			delimiters containing spaces need to be quoted;
-			symbols with special meaning in shell need to be escaped and quoted
-        -s|--space)	use space as secondary delimiter to separate count from attribute
-        --mawk)		use faster mawk interpreter to get counts
-	--help)		view this help file
-    "
+    -c|--case)   ignore case when counting
+    -s|--space)  set space as secondary delimiter to separate count from attribute
+    -m|--match)  provide match position for -h and -o options
+                 if not provided, the center column is used
+    -h|--header) print header; only makes sense for KWIC input without meta-information
+    -d|--delim)  a custom field separator for output;
+                 respective string is automatically quoted if it exists in data;
+                 quotation marks embedded in the text are escaped with a backslash;
+                 delimiters containing spaces need to be quoted;
+    --mawk)      use faster mawk interpreter to get counts
+    --help)      view this help file
+"
 }
 
 # }}} --------------------------------------------------------------------------
@@ -38,15 +37,14 @@ sep="$tab"
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -c|--casefold) case=true; shift ;;
-    -h|--header)   header=true; shift ;;
-    -d|--delim)    delim="$2"; sep="$2"; shift; shift ;;
-    -s|--space)    sep=" "; delim="$tab"; shift ;;
-    -m|--match)    match_i=$2; shift; shift ;;
-    -o|--omit)     omit=true; shift ;;
-    -l|--list)     list=true; shift ;;
-    --mawk)        mawk=true; shift ;;
-    --help)        usage; exit 0 ;;
+    -c|--case)   case=true; shift ;;
+    -h|--header) header=true; shift ;;
+    -d|--delim)  delim="$2"; sep="$2"; shift; shift ;;
+    -s|--space)  sep=" "; delim="$tab"; shift ;;
+    -m|--match)  match_i=$2; shift; shift ;;
+    -l|--list)   list=true; shift ;;
+    --mawk)      mawk=true; shift ;;
+    --help)      usage; exit 0 ;;
     *) break ;;
   esac
 done
@@ -127,20 +125,18 @@ else
 fi
 
 file_per_column get_freqs
-
-if [ $omit ]; then
-  a=$(( match_i * 2 - 1 )); b=$(( match_i * 2 ))
-  [ $header ] && make_header | cut -f$a,$b -d "$delim" --complement
-  format_output | cut -f$a,$b -d "$delim" --complement
-else
-  [ $header ] && make_header
-  format_output
-fi
+[ $header ] && make_header
+format_output
 
 # }}} --------------------------------------------------------------------------
 # {{{ Notes
 #
 # TODO: Feature - wide list; separate script?
+#
+# TODO: diacritic folding as in cqp %d;
+# seems tricky to make
+# iconv work consistently on Mac and Linux
+# need to test what cqp %d does
 #
 # TODO: Add input testing
 #
@@ -149,7 +145,7 @@ fi
 # leads to misaligned columns;
 # known issue with BROWN; "the"; tabulate Last...
 # could test and remove lines with wc -w
-# from CQP v3.4.24, the TokenSeparator and AttributeSeparator
+# from CQP v3.4.24, the TokenSeparator
 # can be set to TAB or another illegal character (untested)
 # see http://cwb.sourceforge.net/files/CQP_Tutorial/7_1.html
 #
