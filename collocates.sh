@@ -1,30 +1,34 @@
 #!/usr/bin/env bash
 
-set -eo pipefail
+set -o errexit
+# set -o nounset
+set -o pipefail
 
 # {{{ Usage
 
 usage() {
-echo "DESCRIPTION
+cat <<-END
+DESCRIPTION
     Tool to create count-annotated collocation tables from square, space-delimited input,
     typically a concordance (e.g. from output of CQP tabulate).
-    Author: Alexander Rauhut
+    (c) 2021 Alexander Rauhut, GNU General Public License 3.0.
 
 USAGE
     [<stdin>] $0 [options] [infile]
 
     -c|--case)   ignore case when counting
-    -s|--space)  set space as secondary delimiter to separate count from attribute
-    -m|--match)  provide match position for -h and -o options
-                 if not provided, the center column is used
-    -h|--header) print header; only makes sense for KWIC input without meta-information
     -d|--delim)  a custom field separator for output;
                  respective string is automatically quoted if it exists in data;
                  quotation marks embedded in the text are escaped with a backslash;
                  delimiters containing spaces need to be quoted;
+    -s|--space)  set space as secondary delimiter to separate count from attribute
+    -m|--match)  provide match position for -h and -o options
+                 if not provided, the center column is used
+    -h|--header) print header; only makes sense for KWIC input without meta-information
     --mawk)      use faster mawk interpreter to get counts
     --help)      view this help file
 "
+END
 }
 
 # }}} --------------------------------------------------------------------------
@@ -134,8 +138,7 @@ format_output
 # TODO: Feature - wide list; separate script?
 #
 # TODO: diacritic folding as in cqp %d;
-# seems tricky to make
-# iconv work consistently on Mac and Linux
+# seems tricky to make iconv work consistently on Mac and Linux
 # need to test what cqp %d does
 #
 # TODO: Add input testing
