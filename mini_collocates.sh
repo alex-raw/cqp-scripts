@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
 # Tool to create collocation tables with counts
+# Provide square space-delimited KWIC via stdin or file
 # Mini version, no options, no fluff
-# Copyright (C) 2020 Alexander Rauhut
+# Copyright (C) 2020 Alexander Rauhut, GNU General Public License 3.0.
 
-data="${1:-/dev/stdin}"
-tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
-[ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
+set -euo pipefail
 
-# infer column number from first line; parallel execution per column
-ncol=$(head -1 "$data" | wc -w)
-for i in $(seq "$ncol"); do
-  cut -f "$i" -d " " "$data" | awk '
+tmp="$(mktemp -d)"; trap 'rm -rf -- "${tmp}"' EXIT
+[ -p /dev/stdin ] && cat /dev/stdin > "${tmp}"/buffer
+
+data="${1:-${tmp}/buffer}"
+ncol=$(head -1 "${data}" | wc -w)
+
+for i in $(seq $ncol); do
+  cut -f $i -d " " "${data}" | awk '
   { f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }
-  ' | sort -nr > "$tmp"/"${i}"out &
+  ' | sort -nr > "${tmp}"/out$i &
 done
 wait
 
-# (don't shortcut to `-d "$delim"` or formatting breaks)
-paste "$tmp"/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
+paste "${tmp}"/out* | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"

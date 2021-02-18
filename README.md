@@ -1,6 +1,12 @@
 # cqp-scripts
 Collection of scripts for wrangling output formats from or querying corpora with CQP (CWB / The IMS Open Corpus Workbench)
 
+## Usage notes
+
+Scripts prefixed with `cwb` are designed to mimic the behavior of the CWB CLI tools, therefore, depend on an existing CWB setup and corresponding environment variables.
+
+All other scripts work independently with plain text input usually expected to be tab or space delimited.
+
 ## One-Liners
 
 #### Corpus token number
@@ -36,6 +42,12 @@ $ cwb-lexdecode -lf BNC | awk '{l[$2] += $1} END {for (i in l) print i,l[i]}'
 4 15956906
 5 10396972
 ...
+```
+
+#### Frequency list: case-sensitive to case-insensitive
+
+```
+awk '{a[tolower($2)] += $1} END {for (i in a) print a[i], i}'
 ```
 
 ## Links:
