@@ -7,6 +7,8 @@ Scripts prefixed with `cwb` are designed to mimic the behavior of the CWB CLI to
 
 All other scripts work independently with plain text input usually expected to be tab or space delimited.
 
+Scripts with the prefix `mini` are debloated clones with hardcoded default behaviour.
+
 ## One-Liners
 
 #### Corpus token number

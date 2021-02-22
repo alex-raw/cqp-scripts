@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 set -o errexit
-# set -o nounset
+set -o nounset
 set -o pipefail
 
 # {{{ Usage
@@ -46,7 +46,6 @@ while [ $# -gt 0 ]; do
     -d|--delim)  delim="$2"; sep="$2"; shift; shift ;;
     -s|--space)  sep=" "; delim="$tab"; shift ;;
     -m|--match)  match_i=$2; shift; shift ;;
-    -l|--list)   list=true; shift ;;
     --mawk)      mawk=true; shift ;;
     --help)      usage; exit 0 ;;
     *) break ;;
@@ -58,40 +57,39 @@ tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 
 # take stdin or file; buffer data on disk for parallel processing
-data="${1:-/dev/stdin}"
-[ "$data" != "$1" ] && cat "$data" > "$tmp"/table && data="$tmp/table"
-
-# Input testing
-[ "$list" ] && echo "The -l|--list option doesn't do anything yet" && exit 1
+[ -p /dev/stdin ] && cat /dev/stdin > "${tmp}"/buffer
+data="${1:-"${tmp}/buffer"}"
 
 # infer column number from 10th line; see NOTE2 below
 ncol=$(head -10 "$data" | tail -1 | wc -w)
-[ $match_i ] || match_i=$(( ncol / 2 + 1 )) # column index of match
+[ -z "${match_i:-}" ] && match_i=$(( ncol / 2 + 1 )) # column index of match
 
 # }}} --------------------------------------------------------------------------
 # {{{ Main functions
 
-[ $mawk ] && awk_cmd="mawk" || awk_cmd="awk"
+[ ${mawk:-} ] && awk_cmd="mawk" || awk_cmd="awk"
 count() {
-  $awk_cmd '{ f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }' | sort -nr
+  $awk_cmd '
+  { f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }
+  ' | sort -nr
 }
+
+fold_case() { tr "[:upper:]" "[:lower:]" ; }
 
 # parallel execution per column
 file_per_column() {
   fun=$1
   for i in $(seq "$ncol"); do
-    cut -f "$i" -d " " "$data" | "$fun" > "$tmp"/"${i}"out &
+    cut -f "$i" -d " " "$data" | "$fun" > "$tmp"/out$i &
   done
   wait
 }
-
-fold_case() { tr "[:upper:]" "[:lower:]" ; }
 
 # paste doesn't handle ragged multi cols;
 # hard-coded tab as temporary delimiter on purpose
 # (don't shortcut to `-d "$delim"` or formatting breaks)
 bind_cols() {
-  paste "$tmp"/[0-9]*out | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
+  paste "$tmp"/out* | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
 }
 
 # }}} --------------------------------------------------------------------------
@@ -122,14 +120,14 @@ format_output() {
 # }}} --------------------------------------------------------------------------
 # {{{ Execution
 
-if [ $case ]; then
+if [ ${case:-} ]; then
   get_freqs() { fold_case | count ; }
 else
   get_freqs() { count ; }
 fi
 
 file_per_column get_freqs
-[ $header ] && make_header
+[ ${header:-} ] && make_header
 format_output
 
 # }}} --------------------------------------------------------------------------
@@ -142,16 +140,7 @@ format_output
 # need to test what cqp %d does
 #
 # TODO: Add input testing
-#
-# NOTE1:
-# Known issue: doesn't work for spaces inside tokens;
-# leads to misaligned columns;
-# known issue with BROWN; "the"; tabulate Last...
-# could test and remove lines with wc -w
-# from CQP v3.4.24, the TokenSeparator
-# can be set to TAB or another illegal character (untested)
-# see http://cwb.sourceforge.net/files/CQP_Tutorial/7_1.html
-#
+
 # NOTE2:
 # Using 10th line to infer column number because output of cqp tabulate
 # is not aligned if one of the matches k words away from the beginning or end
