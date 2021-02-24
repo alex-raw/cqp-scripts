@@ -18,7 +18,23 @@ $ cwb-lexdecode -S BNC | sed -n '1s/[^0-9]//gp'
 1176983
 ```
 
-#### Frequency list for s-attribute
+#### Number of s-attribute regions
+
+```
+# without annotation
+$ cwb-s-decode BNC -S s | wc -l
+
+# with annotation
+$ cwb-s-decode -n BNC -S text_genre | sort | uniq -c
+132 S:meeting
+6 S:parliament
+16 S:pub_debate
+16 S:sermon
+25 S:speech:scripted
+...
+```
+
+#### Frequency list per s-attribute
 
 ```
 # fast:
