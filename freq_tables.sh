@@ -1,30 +1,22 @@
 #!/usr/bin/env bash
 
-set -o errexit
-set -o nounset
-set -o pipefail
-
 # {{{ Usage
 
 usage() {
 cat <<-END
 DESCRIPTION
-    Tool to create count-annotated collocation tables from square, space-delimited input,
-    typically a concordance (e.g. from output of CQP tabulate).
+    Tool to create count-annotated collocation tables from square, whitespace-delimited input,
+    typically a concordance (e.g. from output of CQP tabulate). Tabs, take precedence, so
+    collocation tables with multi-word units can be created if spaces are used as secondary
+    separator.
     (c) 2021 Alexander Rauhut, GNU General Public License 3.0.
 
 USAGE
     [<stdin>] $0 [options] [infile]
 
     -c|--case)   ignore case when counting
-    -d|--delim)  a custom field separator for output;
-                 respective string is automatically quoted if it exists in data;
-                 quotation marks embedded in the text are escaped with a backslash;
-                 delimiters containing spaces need to be quoted;
-    -s|--space)  set space as secondary delimiter to separate count from attribute
-    -m|--match)  provide match position for -h and -o options
-                 if not provided, the center column is used
     -h|--header) print header; only makes sense for KWIC input without meta-information
+    -m|--match)  provide match position for -h option if not provided, the center column is used
     --mawk)      use faster mawk interpreter to get counts
     --help)      view this help file
 "
@@ -34,20 +26,17 @@ END
 # }}} --------------------------------------------------------------------------
 # {{{  Defaults and Options
 
-# $delim separates pairs, $sep delimits token from value
-tab=$(printf '\t')
-delim="$tab"
-sep="$tab"
+set -o errexit
+set -o nounset
+set -o pipefail
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    -c|--case)   case=true; shift ;;
-    -h|--header) header=true; shift ;;
-    -d|--delim)  delim="$2"; sep="$2"; shift; shift ;;
-    -s|--space)  sep=" "; delim="$tab"; shift ;;
-    -m|--match)  match_i=$2; shift; shift ;;
-    --mawk)      mawk=true; shift ;;
-    --help)      usage; exit 0 ;;
+    -c|--ignore-case)   case=true; shift ;;
+    -h|--header)        header=true; shift ;;
+    -m|--match)         match_i=$2; shift; shift ;;
+    --mawk)             mawk=true; shift ;;
+    --help)             usage; exit 0 ;;
     *) break ;;
   esac
 done
@@ -60,61 +49,46 @@ trap 'rm -rf -- "$tmp"' EXIT
 [ -p /dev/stdin ] && cat /dev/stdin > "${tmp}"/buffer
 data="${1:-"${tmp}/buffer"}"
 
-# infer column number from 10th line; see NOTE2 below
-ncol=$(head -10 "$data" | tail -1 | wc -w)
-[ -z "${match_i:-}" ] && match_i=$(( ncol / 2 + 1 )) # column index of match
+# Test for input format; error out if not whitespace
+if head -5 "$data" | grep -qs $'\t'; then
+  delim=$'\t'
+elif head -5 "$data" | grep -qs ' '; then
+  delim=' '
+else
+  echo "Neither spaces nor tabs detected."; exit 1
+fi
 
 # }}} --------------------------------------------------------------------------
 # {{{ Main functions
 
-[ ${mawk:-} ] && awk_cmd="mawk" || awk_cmd="awk"
 count() {
-  $awk_cmd '
-  { f[$0]++; } END { for (tok in f) print(f[tok] " " tok) }
-  ' | sort -nr
+  [ ${mawk:-} ] && awk_cmd="mawk" || awk_cmd="awk"
+  $awk_cmd -v OFS='\t' '{ f[$0]++; } END { for (tok in f) print(f[tok], tok) }'
 }
 
 fold_case() { tr "[:upper:]" "[:lower:]" ; }
 
 # parallel execution per column
 file_per_column() {
+  # infer column number from 10th line; see NOTE2 below
+  ncol=$(head -10 "$data" | tail -1 | wc -w)
   fun=$1
+
   for i in $(seq "$ncol"); do
-    cut -f "$i" -d " " "$data" | "$fun" > "$tmp"/out$i &
-  done
-  wait
+    cut -f "$i" -d " " "$data" | "$fun" | sort -nr > "$tmp"/out$i &
+  done; wait
 }
 
 # paste doesn't handle ragged multi cols;
-# hard-coded tab as temporary delimiter on purpose
-# (don't shortcut to `-d "$delim"` or formatting breaks)
-bind_cols() {
-  paste "$tmp"/out* | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
-}
-
-# }}} --------------------------------------------------------------------------
-# {{{ Additional formatting
+bind_cols() { paste "$tmp"/out* | perl -pe 's/^\t|(?<=(\t))\t/\t\t/g' ; }
 
 make_header() {
-  echo | awk -v x="$sep" -v y="$delim" -v ncol=$ncol -v m=$match_i '
-    { for (i = m - 1; i >= 1; i--) printf "L" i x "frq_L" i y;
-      printf "M" x "frq_M" y;
-      for (i = 1; i <= ncol - m; i++) printf "R" i x "frq_R" i y
-    } END {printf "\n"}' | sed "s/.$//g"
-}
-
-format_output() {
-  if [ "$delim" != "$tab" ]; then
-    # escape quotes; quote delim in input; replace default \t with delim
-    bind_cols \
-      | sed -e 's/\"/\\"/g' \
-            -e "s/$delim\t/\"$delim\"$delim/g" \
-            -e "s/[[:blank:]]/$delim/g"
-  elif [ "$sep" != " " ]; then
-    bind_cols | sed "s/ /$delim/g"
-  else
-    bind_cols
-  fi
+  [ -z "${match_i:-}" ] && match_i=$(( ncol / 2 + 1 )) # column index of match
+  left=$(( match_i - 1 )); right=$(( ncol - match_i ))
+  for (( i=left; i>=1; i-- )); do printf "frq_L$i\tL$i\t"; done
+  printf "frq_M\tM\t"
+  for (( i=1; i<=right; i++ )); do printf "frq_R$i\tR$i\t"; done
+  printf "\n"
 }
 
 # }}} --------------------------------------------------------------------------
@@ -128,12 +102,10 @@ fi
 
 file_per_column get_freqs
 [ ${header:-} ] && make_header
-format_output
+bind_cols
 
 # }}} --------------------------------------------------------------------------
 # {{{ Notes
-#
-# TODO: Feature - wide list; separate script?
 #
 # TODO: diacritic folding as in cqp %d;
 # seems tricky to make iconv work consistently on Mac and Linux
@@ -149,7 +121,6 @@ format_output
 #
 # }}} --------------------------------------------------------------------------
 # {{{ License
-#
 # Tool to create collocation tables with counts
 # Copyright (C) 2020 Alexander Rauhut
 #

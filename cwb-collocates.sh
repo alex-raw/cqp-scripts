@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+# "strict mode"
+set -euo pipefail
+set -o noclobber
+set -x
+
 # {{{ Usage
 usage () {
 cat <<-END
@@ -30,14 +35,7 @@ END
 # }}} ------------------------------------------------------------------------
 # {{{ Options, defaults, and argument parsing
 
-# "strict mode"
-set -euo pipefail
-set -o noclobber
-# IFS=$'\n\t'
-
-range=4
-
-abs_path() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")" ; }
+absolute_path() { echo "$(cd "$(dirname "$1")" && pwd)/$(basename "$1")" ; }
 
 stop_if_missing() {
   if [ -z "$1" ]; then
@@ -45,12 +43,14 @@ stop_if_missing() {
   fi
 }
 
+range=4
+
 while [ $# -gt 0 ]; do
   case "$1" in
-    -c|--case)  case="c"; shift ;;
-    -m|--match) match=true; shift ;;
-    -r|--range) range=$2; shift; shift ;;
-    -f|--file)  file="$(abs_path $2)"; shift; shift ;;
+    -c|--case)  case=true;                  shift ;;
+    -m|--match) match=true;                 shift ;;
+    -r|--range) range=$2;                   shift; shift ;;
+    -f|--file)  file="$(absolute_path $2)"; shift; shift ;;
     -h|--help)  usage; exit 0 ;;
     *) break ;;
   esac
@@ -58,6 +58,9 @@ done
 
 corpus=${1:-}
 attr="${2:-word}"
+
+# set data to filename or create unambiguous temporary filename
+[ "${file:-}" ] && data="${file:-}" || data=".${0##*/}-$$"
 
 stop_if_missing "${corpus}" "No corpus name supplied. See $0 --help."
 
@@ -68,18 +71,6 @@ stop_if_missing "${corpus}" "No corpus name supplied. See $0 --help."
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 cd "$tmp"
-
-# query for corpus positions of matches if not provided
-query() {
-  cqp_cmd="tabulate Last match, matchend"
-  echo "${corpus}; ${query}; ${cqp_cmd} > \"${data}\";" | cqp -c 2>/dev/null
-}
-
-match_cmd="count by ${attr}"
-[ "${case:-}" ] && match_cmd="count by ${attr}\%c"
-
-# set data to filename or create unambiguous temporary filename
-[ "${file:-}" ] && data="${file:-}" || data=".${0##*/}-$$"
 
 # if stdin, buffer file; if neither stdin nor -f, create file with query
 if [ -p /dev/stdin ]; then
@@ -94,14 +85,21 @@ fi
 # }}} ------------------------------------------------------------------------
 # {{{ Helper functions
 
+# query for corpus positions of matches if not provided
+query() {
+  cqp_cmd="tabulate Last match, matchend"
+  echo "${corpus}; ${query}; ${cqp_cmd} > \"${data}\";" | cqp -c 2>/dev/null
+}
+
 # use CQP count to count matches at positions
 count_match() {
-  count_cmd="count by ${attr};"
-  [ ${case:-} ] && case_cmd='%c'
+  count_cmd="count by ${attr}"
+  [ ${case:-} ] && count_cmd="count by ${attr}\%c"
 
   echo "set PrettyPrint off;
   ${corpus}; undump Last < \"${data}\";
-  count by ${attr} ${case_cmd:-};" | cqp -c | cut -f2 --complement | sed '1d'
+  ${count_cmd};" | cqp -c \
+    | cut -f2 --complement | sed '1d'
 }
 
 # scan frequencies at offset positions
@@ -114,9 +112,9 @@ fold() {
 }
 
 if [ ${case:-} ]; then
-  count() { scan | fold ; }
+  count() { scan | fold | sort -nr -k1 ; }
 else
-  count() { scan ; }
+  count() { scan | sort -nr -k1 ; }
 fi
 
 # calculate left and right offset positions; remove out-of-range positions
@@ -132,15 +130,15 @@ main() {
   [ "${match:-}" ] && count_match > right0 &
 
   for ((i=1; i<=range; i++)); do
-    offset_left  $i "${data}" | count | sort -nr -k1 > left$i &
-    offset_right $i "${data}" | count | sort -nr -k1 > right$i 2>/dev/null &
+    offset_left  $i "${data}" | count > left$i &
+    offset_right $i "${data}" | count > right$i 2>/dev/null &
   done
   wait
 
   # join files and pad gaps due to different lengths
   # tac reverses left files to get correct kwic-like ordering after globbing
   paste $(echo left* | tac -s ' ') right* \
-    | sed "s/\t\t/\t\t\t/g" | sed "s/^\t/\t\t/g"
+    | perl -pe 's/^\t|(?<=(\t))\t/\t\t/g'
 }
 
 main
