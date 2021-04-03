@@ -5,7 +5,7 @@
 # trap 'rm -rf -- "$tmp"' EXIT
 # cd $tmp
 
-corpus=${1:-BNC}; attr=${2:-word}
+corpus=${1:-COCA-S}; attr=${2:-word}
 
 # make sure awk consistently reads and outputs tab separated columns
 awk_cmd() { awk -v OFS='\t' "$@" ; }
@@ -32,8 +32,8 @@ join_freqs() {
 
 count() {
 cqp -c <<:
-$corpus; set ms traditional;
-"a" []{1,3} [pos = "N.*"] within s;
+$corpus;
+"the"%c;
 count by word on match[1] > "freqs";
 # tabulate Last match[1]..matchend[-1] word > "table";
 :
@@ -52,8 +52,8 @@ simple_0() {
   raw $corpus $attr | join_freqs - $1
 }
 
-# count
-simple_0 freqs
+count
+simple freqs
 
 # TODO: cwb-lexdecode joins don't work on case-sensitive stuff
 

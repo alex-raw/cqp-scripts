@@ -1,16 +1,28 @@
 #!/usr/bin/env bash
+LC_ALL=C
+
+awk_cmd() { awk -M -v PREC="double" -v OFMT="%.6f" -v OFS="\t" "$@" ; }
+# awk_cmd() { mawk -v OFMT="%.6f" -v OFS="\t" "$@" ; }
 
 data=$1
-awk_cmd() { awk -M -v PREC="double" -v OFMT="%.6f" -v OFS="\t" "$@" ; }
+
+# if sizes not given, calculate
+colsum() { awk_cmd -v i=$1 '{ x += $i } END { print x }' $2 ; }
+[ ${N:-} ] || N=$(colsum 2 $data)
+[ ${n:-} ] || n=$(colsum 3 $data)
 
 obs_exp() {
   # $1=[token] $2=[f_corpus] $3=[f_coll*]
-  awk_cmd 'NR==FNR { N += $2; n += $3; next }        # sums
-    { print $3,         $2 - $3,                     # O11=$1, O12=$2
-      n - $3,           N - ($2 - $3 + n),           # O21=$3, O22=$4
-      $2 * n / N,       $2 * ($3 + $3 + N - n) / N,  # E11=$5, E12=$6
-      (N - $2) * n / N, (N - $2) * (N - n) / N       # E21=$7, E22=$8
-    }' $1 $1
+  awk_cmd -v N=$N -v n=$n '{
+    O11 = $3;        O12 = $2 - O11;         R1 = O11 + O12;
+    O21 = n - O11;   O22 = N - $2 - n + O11; R2 = O21 + O22;
+    C1  = O11 + O21; C2  = O12 + O22;
+
+    E11 = C1 * R1 / N; E12 = C2 * R1 / N;
+    E21 = C1 * R2 / N; E22 = C2 * R2 / N;
+
+    print O11, O12, O21, O22, E11, E12, E21, E22
+  }' $1
 }
 
 logl() {
@@ -26,3 +38,4 @@ logl tmp_O_E | paste $data <(cut -f5 tmp_O_E) - \
   | awk_cmd '{ print $1,$2,$3,$4, ($4>$3) ? -$5 : $5 }' | sort -nr -k5
 
 rm tmp*
+
